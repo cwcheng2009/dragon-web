@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>金龍追珠</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@400;500&display=swap">
+<style>
+/* Layout: a full-screen lacquer stage; title top-left, camera preview bottom-right, one control bar. Single dark look. */
+:root {
+  --lacquer: #120806; --lacquer-2: #2a120b; --gold: #e3b25a; --gold-dim: #9c7637;
+  --ink: #f3e6cf; --muted: #b39c80;
+  --display: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
+  --body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; margin: 0; }
+body { background: radial-gradient(ellipse at 50% 45%, var(--lacquer-2) 0%, var(--lacquer) 72%); color: var(--ink);
+  font-family: var(--body); font-size: 15px; overflow: hidden; }
+#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+header { position: fixed; top: 0; left: 0; right: 0; pointer-events: none;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); }
+h1 { margin: 0; font-family: var(--display); font-weight: 900; font-size: clamp(22px, 4vw, 32px); letter-spacing: 0.1em; color: var(--gold); }
+#status { margin-top: 4px; color: var(--muted); font-size: 13px; }
+.bar { position: fixed; left: 0; bottom: 0; display: flex; gap: 10px; align-items: center;
+  padding: 0 0 calc(14px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+button { font: inherit; font-weight: 500; color: var(--lacquer); background: var(--gold); border: 0; border-radius: 6px; padding: 8px 16px; cursor: pointer; }
+button:disabled { opacity: 0.6; cursor: progress; }
+button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+#camWrap { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  width: min(240px, 38vw); aspect-ratio: 4 / 3; border: 1px solid var(--gold-dim); border-radius: 8px; overflow: hidden; }
+#cam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.75; }
+#tipDot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px var(--gold); }
+#loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+[hidden] { display: none !important; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<header><h1>金龍追珠</h1><div id="status">載入中…</div></header>
+<div id="loading">載入金龍中…</div>
+<div class="bar"><button id="camBtn" type="button">開啟鏡頭（食指控制）</button></div>
+<div id="camWrap" hidden><video id="cam" playsinline muted></video><div id="tipDot" hidden></div></div>
+<script type="module" src="dragon.js"></script>
+</body>
+</html>
