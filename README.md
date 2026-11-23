@@ -1,6 +1,6 @@
 # 金龍追珠（食指控制）
 
-兩顆火焰龍珠跟著鏡頭裡你的**食指指尖**移動（MediaPipe Hands，偵測第 8 號關鍵點），金龍會一路追著龍珠游動；沒有開鏡頭時改用滑鼠或觸控。
+火焰龍珠跟著鏡頭裡你的**食指指尖**移動（MediaPipe Hands，偵測第 8 號關鍵點），金龍會一路追著龍珠游動；沒有開鏡頭時改用滑鼠或觸控。
 
 ## 在 Mac 上開啟
 
@@ -16,9 +16,14 @@
 
 > 鏡頭只能在 `localhost` 或 `https` 網址下使用，直接雙擊 `index.html`（file://）會無法載入模型和鏡頭。
 
+## 音樂與錄影
+
+- **音樂**：按「音樂：關/開」切換（開鏡頭時會自動打開）。全部用瀏覽器即時合成，沒有音檔：龍珠移動越快，古箏般的五聲音階撥弦越密；龍珠在畫面越高，音越高；另有低音持續音、隨速度變大的風聲，突然快速衝刺時會敲一聲鑼。
+- **錄影**：按「● 錄影」開始，再按一次停止，影片會自動下載（Chrome 多為 WebM，Safari 為 MP4）。錄進去的是你看到的畫面：鏡頭背景（依滑桿透明度）、金龍、火焰龍珠，加上音樂。
+
 ## 檔案
 
-- `index.html`、`dragon.js`：網頁與互動程式（three.js + MediaPipe Tasks Vision，皆從 jsDelivr CDN 載入）
+- `index.html`、`dragon.js`、`music.js`：網頁、互動程式與音樂合成（three.js + MediaPipe Tasks Vision，皆從 jsDelivr CDN 載入）
 - `dragon.glb`：帶骨架的金龍（36 節脊椎 + 頭、下顎、四肢），由 `../scripts/v3_rig_animate.py glb` 匯出（`GLB_OUT` 指定路徑）
 
 ## 運作原理

@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { DragonMusic } from './music.js';
 
 const cfg = Object.assign({
   glbUrl: 'dragon.glb',
@@ -128,8 +129,7 @@ function updateFirePearl(g, dt, time) {
   fire.geo.attributes.aLife.needsUpdate = true;
   fire.geo.attributes.aSize.needsUpdate = true;
 }
-const pearlA = makeFirePearl(0.75, 340);
-const pearlB = makeFirePearl(0.5, 220);
+const pearlA = makeFirePearl(1.15, 520);   // one big flaming pearl
 
 // ---------------- target: fingertip / pointer ----------------
 const target = new THREE.Vector3(0, 0, 0);
@@ -223,6 +223,9 @@ function sampleTrail(s) {
 const clock = new THREE.Clock();
 let t = 0;
 const tmpQ = new THREE.Quaternion(), parentQ = new THREE.Quaternion();
+const music = new DragonMusic();
+let rec = null, recCanvas = null, recCtx = null, recStart = 0, recTimer = null;   // recording state (see bottom)
+let prevPearl = null;
 function step(dt) {
   t += dt;
   if (!pointerActive && performance.now() - lastHandTime > 1500) {   // idle: the pearl drifts by itself
@@ -231,12 +234,16 @@ function step(dt) {
   // lead pearl eases toward the fingertip, the second pearl spirals around it
   pearlA.position.lerp(target, 1 - Math.exp(-dt * 6));
   pearlA.position.z = handOn() ? 0 : Math.sin(t * 1.3) * 1.5;   // stay on the fingertip while a hand is tracked
-  pearlB.position.copy(pearlA.position).add(new THREE.Vector3(Math.cos(t * 2.4) * 1.6, Math.sin(t * 2.4) * 1.0, Math.sin(t * 2.4) * 1.4));
-  updateFirePearl(pearlA, dt, t); updateFirePearl(pearlB, dt, t);
+  updateFirePearl(pearlA, dt, t);
+  // music follows the pearl: height -> pitch, speed -> note density / brightness
+  const ps = pearlA.position.clone().project(camera);
+  const pSpeed = prevPearl ? pearlA.position.distanceTo(prevPearl) / Math.max(dt, 1e-3) : 0;
+  prevPearl = (prevPearl || new THREE.Vector3()).copy(pearlA.position);
+  music.update(dt, (ps.y + 1) / 2, pSpeed);
   if (!rig) return;
 
   // head steers toward a point that circles the pearl, so the dragon keeps swimming around it
-  const orbit = new THREE.Vector3(Math.cos(t * 1.1) * 3.2, Math.sin(t * 1.1) * 2.2, Math.sin(t * 0.8) * 2.5);
+  const orbit = new THREE.Vector3(Math.cos(t * 1.1) * 3.6, Math.sin(t * 1.1) * 2.5, Math.sin(t * 0.8) * 2.5);
   const goal = pearlA.position.clone().add(orbit);
   const want = goal.sub(head.p);
   const dist = want.length();
@@ -289,6 +296,7 @@ function loop() {
   if (mixer) mixer.update(dt);
   step(dt);
   renderer.render(scene, camera);
+  if (rec) composite();
   requestAnimationFrame(loop);
 }
 resize(); loop();
@@ -307,6 +315,7 @@ camBtn?.addEventListener('click', async () => {
     video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
     await video.play();
     document.body.classList.add('cam-on'); camBtn.hidden = true; $('opacityCtl').hidden = false;
+    if (!music.on) setMusic(true);
     status('舉起手，用食指指揮龍珠');
     let lastVideoTime = -1;
     const track = () => {
@@ -333,3 +342,66 @@ camBtn?.addEventListener('click', async () => {
     status('無法開啟鏡頭或手部偵測：' + (e.message || e) + '（仍可用滑鼠操作）');
   }
 });
+
+// ---------------- music toggle ----------------
+const musicBtn = $('musicBtn');
+function setMusic(on) {
+  if (on) music.start(); else music.stop();
+  if (musicBtn) { musicBtn.textContent = on ? '音樂：開' : '音樂：關'; musicBtn.setAttribute('aria-pressed', on); }
+}
+musicBtn?.addEventListener('click', () => setMusic(!music.on));
+
+// ---------------- recording (picture + music) ----------------
+// The camera background is a <video> under the WebGL canvas, so while recording we draw both onto one
+// canvas every frame (background, mirrored camera at the chosen opacity, then the dragon) and record that
+// canvas together with the music.
+const recBtn = $('recBtn');
+function composite() {
+  const W = canvas.width, H = canvas.height;
+  if (recCanvas.width !== W || recCanvas.height !== H) { recCanvas.width = W; recCanvas.height = H; }
+  const g = recCtx.createRadialGradient(W * 0.5, H * 0.45, 0, W * 0.5, H * 0.45, Math.max(W, H) * 0.7);
+  g.addColorStop(0, '#2a120b'); g.addColorStop(1, '#120806');
+  recCtx.globalAlpha = 1; recCtx.fillStyle = g; recCtx.fillRect(0, 0, W, H);
+  const video = $('cam');
+  if (document.body.classList.contains('cam-on') && video.videoWidth) {
+    const op = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cam-opacity')) || 0;
+    const sc = Math.max(W / video.videoWidth, H / video.videoHeight), dw = video.videoWidth * sc, dh = video.videoHeight * sc;
+    recCtx.save(); recCtx.globalAlpha = op; recCtx.translate(W, 0); recCtx.scale(-1, 1);
+    recCtx.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh); recCtx.restore();
+  }
+  recCtx.globalAlpha = 1; recCtx.drawImage(canvas, 0, 0);
+}
+function pickType() {
+  const types = ['video/mp4;codecs=avc1,mp4a', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  return types.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+}
+function startRec() {
+  if (!window.MediaRecorder) { status('這個瀏覽器不支援錄影，請改用 Chrome、Edge 或新版 Safari'); return; }
+  if (!music.on) setMusic(true);
+  recCanvas = document.createElement('canvas'); recCtx = recCanvas.getContext('2d'); composite();
+  const stream = recCanvas.captureStream(30);
+  music.stream.getAudioTracks().forEach((tr) => stream.addTrack(tr));
+  const type = pickType(); const chunks = [];
+  rec = new MediaRecorder(stream, type ? { mimeType: type, videoBitsPerSecond: 8e6 } : undefined);
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    const mime = rec.mimeType || type || 'video/webm', ext = mime.includes('mp4') ? 'mp4' : 'webm';
+    const url = URL.createObjectURL(new Blob(chunks, { type: mime }));
+    const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+    const a = document.createElement('a'); a.href = url;
+    a.download = `golden-dragon_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
+    document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    rec = null; status(`影片已下載（${ext.toUpperCase()}）`);
+  };
+  rec.start(500); recStart = performance.now();
+  recBtn.classList.add('recording');
+  const tick = () => { const s = Math.floor((performance.now() - recStart) / 1000);
+    recBtn.textContent = `■ 停止錄影 ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  tick(); recTimer = setInterval(tick, 500);
+}
+function stopRec() {
+  clearInterval(recTimer); recBtn.classList.remove('recording'); recBtn.textContent = '● 錄影';
+  if (rec && rec.state !== 'inactive') rec.stop();
+}
+recBtn?.addEventListener('click', () => (rec ? stopRec() : startRec()));
