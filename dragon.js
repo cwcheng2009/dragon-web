@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { DragonMusic } from './music.js?v=202611231548';
+import { DragonMusic } from './music.js?v=202611231610';
 
 const cfg = Object.assign({
   glbUrl: 'dragon.glb?v=202611231548',
@@ -152,7 +152,7 @@ canvas.addEventListener('pointermove', (e) => {
 const UP_PREF = new THREE.Vector3(0, 0.55, 0.85).normalize();   // dragon's back leans toward the viewer
 let rig = null, mixer = null;
 const trail = [];          // [{p: Vector3, up: Vector3}] newest first
-const head = { p: new THREE.Vector3(), v: new THREE.Vector3(-6, 0, 0), up: UP_PREF.clone() };
+const head = { p: new THREE.Vector3(), v: new THREE.Vector3(-6, 0, 0), up: UP_PREF.clone(), w: new THREE.Vector3() };
 
 function frameQuat(dir, up) {                  // orthonormal frame: Y = dir, Z = up
   const y = dir.clone().normalize();
@@ -223,7 +223,7 @@ function sampleTrail(s) {
 const clock = new THREE.Clock();
 let t = 0;
 const tmpQ = new THREE.Quaternion(), parentQ = new THREE.Quaternion();
-const MIN_R = 6.0;          // smallest turning circle of the head (scene units)
+const MIN_R = 6.5;          // smallest turning circle of the head (scene units)
 const music = new DragonMusic();
 let rec = null, recCanvas = null, recCtx = null, recStart = 0, recTimer = null;   // recording state (see bottom)
 let prevPearl = null;
@@ -243,26 +243,32 @@ function step(dt) {
   music.update(dt, (ps.y + 1) / 2, pSpeed);
   if (!rig) return;
 
-  // head steers toward a point that circles the pearl, so the dragon keeps swimming around it
-  const orbit = new THREE.Vector3(Math.cos(t * 1.1) * 3.6, Math.sin(t * 1.1) * 2.5, Math.sin(t * 0.8) * 2.5);
+  // head steers toward a point that drifts gently around the pearl (mostly in the screen plane)
+  const orbit = new THREE.Vector3(Math.cos(t * 0.7) * 2.2, Math.sin(t * 0.7) * 1.6, 0);
   const goal = pearlA.position.clone().add(orbit);
+  goal.z = Math.sin(t * 0.45) * 1.0;                 // only a slight, slow depth sway (deep loops look like kinks on screen)
   const want = goal.sub(head.p);
   const dist = want.length();
-  const speed = THREE.MathUtils.clamp(dist * 2.2, 5, 22);
-  want.setLength(speed);
-  // steer with a limited turn rate: the head always swims in round arcs (minimum radius MIN_R), never sharp corners
+  const speed = THREE.MathUtils.clamp(dist * 2.0, 5, 22);
+  // smooth steering: the turn rate itself eases in and out, so curvature changes gradually along the body
   const curSpeed = Math.max(4, THREE.MathUtils.lerp(head.v.length(), speed, 1 - Math.exp(-dt * 2.0)));
   const curDir = head.v.clone().normalize(), wantDir = want.clone().normalize();
-  const ang = curDir.angleTo(wantDir), maxTurn = (curSpeed / MIN_R) * dt;
-  if (ang > 1e-4) {
-    const q = new THREE.Quaternion().setFromUnitVectors(curDir, wantDir);
-    curDir.applyQuaternion(new THREE.Quaternion().slerp(q, Math.min(1, maxTurn / ang)));
-  }
+  const ang = curDir.angleTo(wantDir);
+  const axis = new THREE.Vector3().crossVectors(curDir, wantDir);
+  if (axis.lengthSq() < 1e-8) axis.copy(head.up); axis.normalize();
+  const maxRate = curSpeed / MIN_R;                       // rad/s at the tightest allowed circle
+  const wantRate = Math.min(maxRate, ang * 2.5);
+  head.w.lerp(axis.multiplyScalar(wantRate), 1 - Math.exp(-dt * 2.2));   // angular velocity eases in/out
+  const wl = head.w.length();
+  if (wl > 1e-5) curDir.applyAxisAngle(head.w.clone().divideScalar(wl), wl * dt);
+  curDir.z *= 1 - Math.min(1, dt * 1.5); curDir.normalize();   // keep swimming mostly across the screen
   head.v.copy(curDir).multiplyScalar(curSpeed);
   const prevDir = head.v.clone().normalize();
   head.p.addScaledVector(head.v, dt);
   // keep the back up: transport the previous up, then relax toward the preferred up
-  head.up.sub(prevDir.clone().multiplyScalar(head.up.dot(prevDir))).normalize().lerp(UP_PREF, 1 - Math.exp(-dt * 1.5)).normalize();
+  // bank gently into turns (the back leans into the curve, like a swimmer rolling into a turn)
+  const upGoal = UP_PREF.clone().addScaledVector(new THREE.Vector3().crossVectors(head.w, prevDir), 0.25).normalize();
+  head.up.sub(prevDir.clone().multiplyScalar(head.up.dot(prevDir))).normalize().lerp(upGoal, 1 - Math.exp(-dt * 1.5)).normalize();
 
   if (trail[0].p.distanceTo(head.p) > 0.08) trail.unshift({ p: head.p.clone(), up: head.up.clone() });
   else trail[0].p.copy(head.p);

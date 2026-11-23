@@ -1,6 +1,6 @@
 // 互動音樂：完全用 Web Audio 即時合成，不需要任何音檔。
 // - 撥弦（類似古箏）：龍珠移動越快，音符越密；龍珠在畫面越高，音越高。音階是 D 宮五聲音階。
-// - 低音持續音：D 與 A 的五度，隨速度變亮。
+// - 低音持續音：D 與 A 的五度（純正弦波），隨速度稍微變大聲。
 // - 銅鑼：突然加速衝刺時敲一下。
 // 所有聲音都送到 master，同時接一份到 recordDest，給錄影用。
 export class DragonMusic {
@@ -26,23 +26,26 @@ export class DragonMusic {
     const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 3;
     this.master.connect(comp); comp.connect(ctx.destination);
     this.recordDest = ctx.createMediaStreamDestination(); comp.connect(this.recordDest);
-    // hall reverb from a generated impulse response
+    // hall reverb: a smooth, dark impulse response (low-passed noise with a gentle fade-in),
+    // so the reverb tail is a soft bloom instead of a hiss
     this.reverb = ctx.createConvolver();
-    const len = ctx.sampleRate * 3.2, ir = ctx.createBuffer(2, len, ctx.sampleRate);
-    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+    const len = Math.floor(ctx.sampleRate * 2.4), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); let lp = 0, lp2 = 0;
+      for (let i = 0; i < len; i++) {
+        const x = i / len;
+        lp += 0.06 * ((Math.random() * 2 - 1) - lp); lp2 += 0.06 * (lp - lp2);    // two-pole lowpass ≈ 450 Hz
+        d[i] = lp2 * 6 * Math.min(1, i / (ctx.sampleRate * 0.02)) * Math.pow(1 - x, 3);
+      } }
     this.reverb.buffer = ir;
-    const wet = ctx.createGain(); wet.gain.value = 0.38; this.reverb.connect(wet); wet.connect(this.master);
-    this.dry = ctx.createGain(); this.dry.gain.value = 0.8; this.dry.connect(this.master); this.dry.connect(this.reverb);
+    const wet = ctx.createGain(); wet.gain.value = 0.22; this.reverb.connect(wet); wet.connect(this.master);
+    this.dry = ctx.createGain(); this.dry.gain.value = 0.85; this.dry.connect(this.master); this.dry.connect(this.reverb);
 
-    // drone: D2 + A2 + D3, through a lowpass that opens with speed
-    this.droneFilter = ctx.createBiquadFilter(); this.droneFilter.type = 'lowpass'; this.droneFilter.frequency.value = 300;
-    this.droneGain = ctx.createGain(); this.droneGain.gain.value = 0.07;
-    this.droneFilter.connect(this.droneGain); this.droneGain.connect(this.dry);
-    [73.42, 110.0, 146.83].forEach((f, i) => {
-      const o = ctx.createOscillator(); o.type = i === 1 ? 'triangle' : 'sawtooth'; o.frequency.value = f;
-      o.detune.value = (i - 1) * 4; const g = ctx.createGain(); g.gain.value = i === 2 ? 0.25 : 0.5;
-      o.connect(g); g.connect(this.droneFilter); o.start();
+    // drone: pure sine tones D2 + A2 + D3 (no buzzy waveforms), swelling softly with speed
+    this.droneGain = ctx.createGain(); this.droneGain.gain.value = 0.05;
+    this.droneGain.connect(this.master);    // dry only: the reverb would smear it into a wash
+    [[73.42, 0.5], [110.0, 0.3], [146.83, 0.18]].forEach(([f, a]) => {
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      const g = ctx.createGain(); g.gain.value = a; o.connect(g); g.connect(this.droneGain); o.start();
     });
   }
 
@@ -83,7 +86,7 @@ export class DragonMusic {
   update(dt, y01, speed) {
     if (!this.on || !this.ctx) return;
     const now = this.ctx.currentTime, sp = Math.min(speed / 25, 1);
-    this.droneFilter.frequency.setTargetAtTime(260 + 1400 * sp, now, 0.3);
+    this.droneGain.gain.setTargetAtTime(0.04 + 0.04 * sp, now, 0.5);
     // notes: one every ~1.6 units of travel
     this.acc += speed * dt;
     if (this.acc > 1.6 && speed > 1.5) {
