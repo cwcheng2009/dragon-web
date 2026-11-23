@@ -1,7 +1,6 @@
 // 互動音樂：完全用 Web Audio 即時合成，不需要任何音檔。
 // - 撥弦（類似古箏）：龍珠移動越快，音符越密；龍珠在畫面越高，音越高。音階是 D 宮五聲音階。
 // - 低音持續音：D 與 A 的五度，隨速度變亮。
-// - 風聲：濾波過的噪音，速度越快越響、越亮。
 // - 銅鑼：突然加速衝刺時敲一下。
 // 所有聲音都送到 master，同時接一份到 recordDest，給錄影用。
 export class DragonMusic {
@@ -45,13 +44,6 @@ export class DragonMusic {
       o.detune.value = (i - 1) * 4; const g = ctx.createGain(); g.gain.value = i === 2 ? 0.25 : 0.5;
       o.connect(g); g.connect(this.droneFilter); o.start();
     });
-    // wind: band-passed noise
-    const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), nd = nb.getChannelData(0);
-    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource(); noise.buffer = nb; noise.loop = true;
-    this.windFilter = ctx.createBiquadFilter(); this.windFilter.type = 'bandpass'; this.windFilter.Q.value = 0.8; this.windFilter.frequency.value = 500;
-    this.windGain = ctx.createGain(); this.windGain.gain.value = 0;
-    noise.connect(this.windFilter); this.windFilter.connect(this.windGain); this.windGain.connect(this.dry); noise.start();
   }
 
   // D major pentatonic over three octaves (D E F# A B)
@@ -92,8 +84,6 @@ export class DragonMusic {
     if (!this.on || !this.ctx) return;
     const now = this.ctx.currentTime, sp = Math.min(speed / 25, 1);
     this.droneFilter.frequency.setTargetAtTime(260 + 1400 * sp, now, 0.3);
-    this.windGain.gain.setTargetAtTime(0.05 * sp * sp, now, 0.25);
-    this.windFilter.frequency.setTargetAtTime(350 + 1800 * sp, now, 0.25);
     // notes: one every ~1.6 units of travel
     this.acc += speed * dt;
     if (this.acc > 1.6 && speed > 1.5) {

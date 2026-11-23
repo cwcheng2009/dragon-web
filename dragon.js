@@ -4,10 +4,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { DragonMusic } from './music.js?v=202611231545';
+import { DragonMusic } from './music.js?v=202611231548';
 
 const cfg = Object.assign({
-  glbUrl: 'dragon.glb?v=202611231545',
+  glbUrl: 'dragon.glb?v=202611231548',
   mediapipe: true,
   mpBundle: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs',
   mpWasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
@@ -223,7 +223,7 @@ function sampleTrail(s) {
 const clock = new THREE.Clock();
 let t = 0;
 const tmpQ = new THREE.Quaternion(), parentQ = new THREE.Quaternion();
-const MIN_R = 4.0;          // smallest turning circle of the head (scene units)
+const MIN_R = 6.0;          // smallest turning circle of the head (scene units)
 const music = new DragonMusic();
 let rec = null, recCanvas = null, recCtx = null, recStart = 0, recTimer = null;   // recording state (see bottom)
 let prevPearl = null;
@@ -282,7 +282,7 @@ function step(dt) {
     U.push(a.up);
   }
   // 2) relax the joint chain so every bend is spread over several vertebrae (round curves, no kinks)
-  for (let it = 0; it < 4; it++) {
+  for (let it = 0; it < 10; it++) {
     for (let k = 1; k < N; k++) J[k] = J[k].clone().multiplyScalar(0.5).addScaledVector(J[k - 1], 0.25).addScaledVector(J[k + 1], 0.25);
   }
   // 3) orient each bone from joint k to joint k+1
