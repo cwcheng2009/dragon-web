@@ -36,27 +36,100 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
-// ---------------- pearls ----------------
-function makePearl(r, color, glow) {
-  const g = new THREE.Group();
-  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 48, 24), new THREE.MeshPhysicalMaterial({
-    color, roughness: 0.15, metalness: 0, clearcoat: 1, iridescence: 0.6, emissive: color, emissiveIntensity: 0.35 }));
-  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: glow, transparent: true,
-    blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.55 }));
-  halo.scale.setScalar(r * 5);
-  const light = new THREE.PointLight(glow, 30, 14, 1.6);
-  g.add(m, halo, light); scene.add(g);
-  return g;
-}
-function glowTexture() {
+// ---------------- flaming pearls ----------------
+// Each pearl: a glowing core, a flickering halo and a pool of fire particles that are born on the pearl's
+// surface, swirl around it, rise and fade from white-gold to red. Particles live in world space, so a moving
+// pearl leaves a trail of flame behind it.
+function glowTexture(stops) {
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const x = c.getContext('2d'); const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64);
-  gr.addColorStop(0, 'rgba(255,220,160,1)'); gr.addColorStop(0.35, 'rgba(255,170,70,0.35)'); gr.addColorStop(1, 'rgba(255,140,40,0)');
+  stops.forEach(([o, col]) => gr.addColorStop(o, col));
   x.fillStyle = gr; x.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
 }
-const pearlA = makePearl(0.75, 0xf3d3a0, 0xffb054);
-const pearlB = makePearl(0.5, 0xf6e1c0, 0xffc77a);
+const HALO_TEX = glowTexture([[0, 'rgba(255,240,200,1)'], [0.25, 'rgba(255,170,60,0.55)'], [0.6, 'rgba(255,80,10,0.18)'], [1, 'rgba(255,40,0,0)']]);
+
+const FIRE_VS = `
+  attribute float aLife; attribute float aSize; attribute float aSeed;
+  varying float vLife; varying float vSeed;
+  uniform float uScale;
+  void main() {
+    vLife = aLife; vSeed = aSeed;
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    float grow = smoothstep(0.0, 0.15, aLife) * (1.0 - aLife * 0.75);
+    gl_PointSize = aSize * grow * uScale / -mv.z;
+    gl_Position = projectionMatrix * mv;
+  }`;
+const FIRE_FS = `
+  varying float vLife; varying float vSeed;
+  void main() {
+    vec2 p = gl_PointCoord * 2.0 - 1.0;
+    p.y += 0.25 * p.x * p.x;                       // teardrop: flame tongues point upward
+    float r = length(p * vec2(1.0, 0.8));
+    float a = smoothstep(1.0, 0.0, r);
+    a *= 1.0 - smoothstep(0.55, 1.0, vLife);
+    vec3 hot = vec3(1.0, 0.95, 0.75), mid = vec3(1.0, 0.55, 0.08), cool = vec3(0.85, 0.12, 0.02);
+    vec3 col = vLife < 0.35 ? mix(hot, mid, vLife / 0.35) : mix(mid, cool, (vLife - 0.35) / 0.65);
+    gl_FragColor = vec4(col * (1.2 - 0.4 * vSeed), a * 0.9);
+  }`;
+
+function makeFirePearl(r, count) {
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.SphereGeometry(r, 48, 24), new THREE.MeshPhysicalMaterial({
+    color: 0xffb860, roughness: 0.2, metalness: 0, clearcoat: 1, emissive: 0xff7a1a, emissiveIntensity: 1.2 }));
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: HALO_TEX, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false }));
+  halo.scale.setScalar(r * 6);
+  const light = new THREE.PointLight(0xff8a2a, 40, 16, 1.6);
+  g.add(core, halo, light); scene.add(g);
+
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(count * 3), life = new Float32Array(count), size = new Float32Array(count), seed = new Float32Array(count);
+  const vel = new Float32Array(count * 3), span = new Float32Array(count);
+  for (let i = 0; i < count; i++) { life[i] = Math.random(); span[i] = 1; seed[i] = Math.random(); }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aLife', new THREE.BufferAttribute(life, 1));
+  geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+  geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  const mat = new THREE.ShaderMaterial({ vertexShader: FIRE_VS, fragmentShader: FIRE_FS, transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uScale: { value: 420 } } });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; scene.add(pts);
+  const fire = { pos, life, size, seed, vel, span, geo, count, r };
+
+  g.userData = { core, halo, light, fire, phase: Math.random() * 10 };
+  return g;
+}
+
+const _tmp = new THREE.Vector3();
+function updateFirePearl(g, dt, time) {
+  const { halo, light, fire, phase } = g.userData;
+  const f = 0.85 + 0.15 * Math.sin(time * 17 + phase) * Math.sin(time * 7.3 + phase * 2);   // flicker
+  halo.scale.setScalar(fire.r * 6 * f); light.intensity = 40 * f;
+  const c = g.position;
+  for (let i = 0; i < fire.count; i++) {
+    fire.life[i] += dt / fire.span[i];
+    const i3 = i * 3;
+    if (fire.life[i] >= 1) {                       // respawn on the pearl's surface
+      _tmp.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize();
+      fire.pos[i3] = c.x + _tmp.x * fire.r * 0.9; fire.pos[i3 + 1] = c.y + _tmp.y * fire.r * 0.9; fire.pos[i3 + 2] = c.z + _tmp.z * fire.r * 0.9;
+      const swirl = 2.2;                            // tangential swirl around the vertical axis
+      fire.vel[i3] = _tmp.x * 0.8 - _tmp.z * swirl; fire.vel[i3 + 1] = 2.2 + Math.random() * 2.2; fire.vel[i3 + 2] = _tmp.z * 0.8 + _tmp.x * swirl;
+      fire.life[i] = 0; fire.span[i] = 0.45 + Math.random() * 0.55;
+      fire.size[i] = fire.r * (2.4 + Math.random() * 2.2);
+    } else {
+      const s = fire.seed[i] * 6.28;
+      fire.vel[i3] += Math.sin(time * 9 + s) * 4 * dt;                  // turbulence
+      fire.vel[i3 + 2] += Math.cos(time * 8 + s) * 4 * dt;
+      fire.vel[i3 + 1] += 2.5 * dt;                                     // buoyancy
+      fire.pos[i3] += fire.vel[i3] * dt; fire.pos[i3 + 1] += fire.vel[i3 + 1] * dt; fire.pos[i3 + 2] += fire.vel[i3 + 2] * dt;
+    }
+  }
+  fire.geo.attributes.position.needsUpdate = true;
+  fire.geo.attributes.aLife.needsUpdate = true;
+  fire.geo.attributes.aSize.needsUpdate = true;
+}
+const pearlA = makeFirePearl(0.75, 340);
+const pearlB = makeFirePearl(0.5, 220);
 
 // ---------------- target: fingertip / pointer ----------------
 const target = new THREE.Vector3(0, 0, 0);
@@ -67,9 +140,10 @@ function setTargetFromNdc(x, y) {          // x, y in -1..1
   ray.ray.intersectPlane(plane, target);
 }
 let pointerActive = false, lastHandTime = -1e9;
+const handOn = () => performance.now() - lastHandTime < 800;
 canvas.addEventListener('pointermove', (e) => {
   const r = canvas.getBoundingClientRect();
-  if (performance.now() - lastHandTime < 800) return;   // the hand wins while it is visible
+  if (handOn()) return;   // the hand wins while it is visible
   setTargetFromNdc(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   pointerActive = true;
 });
@@ -156,8 +230,9 @@ function step(dt) {
   }
   // lead pearl eases toward the fingertip, the second pearl spirals around it
   pearlA.position.lerp(target, 1 - Math.exp(-dt * 6));
-  pearlA.position.z = Math.sin(t * 1.3) * 1.5;
+  pearlA.position.z = handOn() ? 0 : Math.sin(t * 1.3) * 1.5;   // stay on the fingertip while a hand is tracked
   pearlB.position.copy(pearlA.position).add(new THREE.Vector3(Math.cos(t * 2.4) * 1.6, Math.sin(t * 2.4) * 1.0, Math.sin(t * 2.4) * 1.4));
+  updateFirePearl(pearlA, dt, t); updateFirePearl(pearlB, dt, t);
   if (!rig) return;
 
   // head steers toward a point that circles the pearl, so the dragon keeps swimming around it
@@ -231,9 +306,8 @@ camBtn?.addEventListener('click', async () => {
     const video = $('cam');
     video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
     await video.play();
-    $('camWrap').hidden = false; camBtn.hidden = true;
+    document.body.classList.add('cam-on'); camBtn.hidden = true; $('opacityCtl').hidden = false;
     status('舉起手，用食指指揮龍珠');
-    const dot = $('tipDot');
     let lastVideoTime = -1;
     const track = () => {
       if (video.currentTime !== lastVideoTime) {
@@ -242,11 +316,13 @@ camBtn?.addEventListener('click', async () => {
         const lm = res.landmarks && res.landmarks[0];
         if (lm) {
           const tipLm = lm[8];                       // landmark 8 = index finger tip
-          const x = 1 - tipLm.x, y = tipLm.y;        // mirror like a selfie
-          setTargetFromNdc((x - 0.5) * 2.4, -(y - 0.5) * 2.4);   // a little gain so the edges are reachable
+          // where the fingertip appears in the full-screen, mirrored, object-fit: cover video
+          const W = window.innerWidth, H = window.innerHeight, vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+          const sc = Math.max(W / vw, H / vh), dw = vw * sc, dh = vh * sc;
+          const sx = (W - dw) / 2 + (1 - tipLm.x) * dw, sy = (H - dh) / 2 + tipLm.y * dh;
+          setTargetFromNdc(sx / W * 2 - 1, -(sy / H) * 2 + 1);   // the pearl sits right on your fingertip
           lastHandTime = performance.now(); pointerActive = false;
-          dot.hidden = false; dot.style.left = (x * 100) + '%'; dot.style.top = (y * 100) + '%';
-        } else dot.hidden = true;
+        }
       }
       requestAnimationFrame(track);
     };

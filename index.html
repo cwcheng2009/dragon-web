@@ -27,10 +27,15 @@ h1 { margin: 0; font-family: var(--display); font-weight: 900; font-size: clamp(
 button { font: inherit; font-weight: 500; color: var(--lacquer); background: var(--gold); border: 0; border-radius: 6px; padding: 8px 16px; cursor: pointer; }
 button:disabled { opacity: 0.6; cursor: progress; }
 button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-#camWrap { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-  width: min(240px, 38vw); aspect-ratio: 4 / 3; border: 1px solid var(--gold-dim); border-radius: 8px; overflow: hidden; }
-#cam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.75; }
-#tipDot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px var(--gold); }
+#cam { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1);
+  opacity: var(--cam-opacity, 0.6); visibility: hidden; }
+body.cam-on #cam { visibility: visible; }
+#stage { z-index: 1; }
+header, .bar, #loading { z-index: 2; }
+#opacityCtl { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px;
+  background: rgba(18, 8, 6, 0.6); border: 1px solid var(--gold-dim); border-radius: 6px; padding: 6px 12px; }
+#opacityCtl input { accent-color: var(--gold); width: 140px; }
+#opacityVal { min-width: 3em; font-variant-numeric: tabular-nums; }
 #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 [hidden] { display: none !important; }
 </style>
@@ -45,8 +50,21 @@ button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 <canvas id="stage"></canvas>
 <header><h1>金龍追珠</h1><div id="status">載入中…</div></header>
 <div id="loading">載入金龍中…</div>
-<div class="bar"><button id="camBtn" type="button">開啟鏡頭（食指控制）</button></div>
-<div id="camWrap" hidden><video id="cam" playsinline muted></video><div id="tipDot" hidden></div></div>
+<video id="cam" playsinline muted></video>
+<div class="bar">
+  <button id="camBtn" type="button">開啟鏡頭（食指控制）</button>
+  <label id="opacityCtl" for="opacity" hidden>背景影像 <input id="opacity" type="range" min="0" max="100" step="5" value="60"><span id="opacityVal">60%</span></label>
+</div>
+<script>
+  (function () {
+    const r = document.getElementById('opacity'), v = document.getElementById('opacityVal');
+    let saved = null; try { saved = localStorage.getItem('dragonCamOpacity'); } catch (e) {}
+    if (saved !== null) r.value = saved;
+    const apply = () => { document.documentElement.style.setProperty('--cam-opacity', r.value / 100); v.textContent = r.value + '%';
+      try { localStorage.setItem('dragonCamOpacity', r.value); } catch (e) {} };
+    r.addEventListener('input', apply); apply();
+  })();
+</script>
 <script type="module" src="dragon.js"></script>
 </body>
 </html>
