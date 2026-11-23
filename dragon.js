@@ -4,10 +4,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { DragonMusic } from './music.js?v=202611231543';
+import { DragonMusic } from './music.js?v=202611231545';
 
 const cfg = Object.assign({
-  glbUrl: 'dragon.glb?v=202611231543',
+  glbUrl: 'dragon.glb?v=202611231545',
   mediapipe: true,
   mpBundle: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs',
   mpWasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
@@ -223,6 +223,7 @@ function sampleTrail(s) {
 const clock = new THREE.Clock();
 let t = 0;
 const tmpQ = new THREE.Quaternion(), parentQ = new THREE.Quaternion();
+const MIN_R = 4.0;          // smallest turning circle of the head (scene units)
 const music = new DragonMusic();
 let rec = null, recCanvas = null, recCtx = null, recStart = 0, recTimer = null;   // recording state (see bottom)
 let prevPearl = null;
@@ -249,8 +250,15 @@ function step(dt) {
   const dist = want.length();
   const speed = THREE.MathUtils.clamp(dist * 2.2, 5, 22);
   want.setLength(speed);
-  head.v.lerp(want, 1 - Math.exp(-dt * 2.4));
-  if (head.v.length() < 4) head.v.setLength(4);
+  // steer with a limited turn rate: the head always swims in round arcs (minimum radius MIN_R), never sharp corners
+  const curSpeed = Math.max(4, THREE.MathUtils.lerp(head.v.length(), speed, 1 - Math.exp(-dt * 2.0)));
+  const curDir = head.v.clone().normalize(), wantDir = want.clone().normalize();
+  const ang = curDir.angleTo(wantDir), maxTurn = (curSpeed / MIN_R) * dt;
+  if (ang > 1e-4) {
+    const q = new THREE.Quaternion().setFromUnitVectors(curDir, wantDir);
+    curDir.applyQuaternion(new THREE.Quaternion().slerp(q, Math.min(1, maxTurn / ang)));
+  }
+  head.v.copy(curDir).multiplyScalar(curSpeed);
   const prevDir = head.v.clone().normalize();
   head.p.addScaledVector(head.v, dt);
   // keep the back up: transport the previous up, then relax toward the preferred up
@@ -265,20 +273,28 @@ function step(dt) {
   // place every spine bone along the trail, with a soft travelling weave
   const { spine, seg, rest } = rig;
   rig.root.updateMatrixWorld(true);
-  for (let k = 0; k < spine.length; k++) {
-    const s0 = k * seg, s1 = (k + 1) * seg;
-    const a = sampleTrail(s0), b = sampleTrail(s1);
-    const dir = b.p.clone().sub(a.p);
-    const fade = Math.min(1, s0 / 3);
-    const side = new THREE.Vector3().crossVectors(dir, a.up).normalize();
-    a.p.addScaledVector(side, 0.35 * fade * Math.sin(0.55 * s0 - t * 6));
-    const want = frameQuat(dir, a.up);
+  // 1) joints along the trail, with a soft travelling side-to-side weave
+  const N = spine.length, J = [], U = [];
+  for (let k = 0; k <= N; k++) {
+    const sk = k * seg, a = sampleTrail(sk), b = sampleTrail(sk + 0.3);
+    const side = new THREE.Vector3().crossVectors(b.p.clone().sub(a.p), a.up).normalize();
+    J.push(a.p.addScaledVector(side, 0.3 * Math.min(1, sk / 3) * Math.sin(0.5 * sk - t * 5)));
+    U.push(a.up);
+  }
+  // 2) relax the joint chain so every bend is spread over several vertebrae (round curves, no kinks)
+  for (let it = 0; it < 4; it++) {
+    for (let k = 1; k < N; k++) J[k] = J[k].clone().multiplyScalar(0.5).addScaledVector(J[k - 1], 0.25).addScaledVector(J[k + 1], 0.25);
+  }
+  // 3) orient each bone from joint k to joint k+1
+  for (let k = 0; k < N; k++) {
+    const dir = J[k + 1].clone().sub(J[k]);
+    const want = frameQuat(dir, U[k]);
     // world rotation = (desired frame) * (rest frame)^-1 * (rest world rotation)
     const worldQ = want.clone().multiply(rest[k].frame.clone().invert()).multiply(rest[k].q);
     const bone = spine[k], parent = bone.parent;
     parent.getWorldQuaternion(parentQ);
     bone.quaternion.copy(parentQ.clone().invert().multiply(worldQ));
-    if (k === 0) bone.position.copy(parent.worldToLocal(a.p.clone()));
+    if (k === 0) bone.position.copy(parent.worldToLocal(J[0].clone()));
     bone.updateMatrixWorld(true);
   }
   // head looks along its motion, glancing at the pearl
