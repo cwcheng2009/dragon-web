@@ -4,10 +4,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { DragonMusic } from './music.js';
+import { DragonMusic } from './music.js?v=202611231543';
 
 const cfg = Object.assign({
-  glbUrl: 'dragon.glb',
+  glbUrl: 'dragon.glb?v=202611231543',
   mediapipe: true,
   mpBundle: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs',
   mpWasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
